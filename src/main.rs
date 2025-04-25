@@ -168,3 +168,57 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::frr_reload;
+    use tracing::debug;
+    use tracing_test::traced_test;
+    const SAMPLE_CONFIG: &str = "
+!
+log stdout
+frr defaults datacenter
+hostname FOO
+service integrated-vtysh-config
+!
+router bgp 65000
+bgp router-id 7.0.0.100
+no bgp network import-check
+no bgp ebgp-requires-policy
+no bgp default ipv4-unicast
+neighbor 7.0.0.2 remote-as 65000
+neighbor 7.0.0.2 capability dynamic
+neighbor 7.0.0.2 description Spine switch
+neighbor 7.0.0.2 update-source 7.0.0.100
+!
+address-family l2vpn evpn
+neighbor 7.0.0.2 activate
+advertise-all-vni
+exit-address-family
+!
+exit
+";
+
+    // This is not really a test and is unfinished
+    #[test]
+    #[traced_test]
+    fn test_reloader() {
+        let config_string = SAMPLE_CONFIG;
+        debug!("Got config!");
+
+        let reloader = "frr-reload.py";
+        let outdir = "/tmp/configs/hedgehog";
+
+        let args = vec![
+            "--stdout",
+            "--debug",
+            "--confdir",
+            "/tmp",
+            "--bindir",
+            "/usr/local/bin",
+        ];
+
+        let result = frr_reload(reloader, &config_string, outdir, &args);
+        println!("result: {result}");
+    }
+}
