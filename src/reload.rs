@@ -16,11 +16,11 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum FrrErr {
-    #[error("Failed to write config file {0}")]
+    #[error("Failed to write config file: {0}")]
     COnfigFileWriteFailed(String),
-    #[error("Failed to spawn command {0}")]
+    #[error("Failed to spawn reloader: {0}")]
     CmdSpawnFailed(String),
-    #[error("Failed to wait for command {0}")]
+    #[error("Failed to wait for reloader: {0}")]
     CmdWaitFailed(String),
     #[error("Reloading error")]
     ReloadErr,
