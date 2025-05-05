@@ -52,12 +52,12 @@ fn receive_request(sock: &UnixDatagram) -> Option<(SocketAddr, String)> {
         return None;
     } else {
         msg_size = u64::from_ne_bytes(msg_size_wire);
-        debug!("Received config size: {} octets", msg_size);
+        debug!("Received request size: {} octets", msg_size);
         if msg_size as usize > rx_buff.capacity() {
             rx_buff.resize(msg_size as usize, 0);
         }
     }
-    debug!("Waiting to receive config of {} octets", msg_size);
+    debug!("Waiting to receive request of {} octets", msg_size);
     match sock.recv_from(rx_buff.as_mut_slice()) {
         Ok((rx_len, peer)) => {
             if let Ok(decoded) = String::from_utf8(rx_buff[0..rx_len].to_vec()) {
@@ -153,14 +153,19 @@ fn main() {
 
     loop {
         // receive request to apply config. Request is a string with the whole config
-        if let Some((requestor, conf_string)) = receive_request(&sock) {
-            // apply config
-            let response = frr_reload(
-                args.reloader(),
-                &conf_string,
-                args.outdir(),
-                &frr_reload_args,
-            );
+        if let Some((requestor, request_string)) = receive_request(&sock) {
+            let response = if &request_string == "KEEPALIVE" {
+                debug!("Got keepalive request from {requestor:?}");
+                "Ok".to_string()
+            } else {
+                debug!("Got config request from {requestor:?}");
+                frr_reload(
+                    args.reloader(),
+                    &request_string,
+                    args.outdir(),
+                    &frr_reload_args,
+                )
+            };
             // reply right after
             if let Err(e) = sock.send_to_addr(response.as_bytes(), &requestor) {
                 error!("Error sending response: {e}");
