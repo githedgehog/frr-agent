@@ -10,17 +10,19 @@ use std::os::unix::net::SocketAddr;
 use std::os::unix::net::UnixDatagram;
 use std::path::Path;
 use std::process::exit;
+use std::str::FromStr;
 use tracing::{Level, debug, error};
 
 use crate::reload::frr_reload;
 
 mod reload;
+pub type GenId = i64;
 
 // initialize logging
-fn init_logging() {
+fn init_logging(loglevel: Level) {
     tracing_subscriber::fmt()
         .with_level(true)
-        .with_max_level(Level::DEBUG)
+        .with_max_level(loglevel)
         .compact()
         .init();
 }
@@ -39,29 +41,44 @@ fn open_unix_sock<P: AsRef<Path>>(bind_addr: &P) -> Result<UnixDatagram, &'stati
     Ok(sock)
 }
 
-// wait for a request to come and return it as a String. We don't need to pass metadata
-// as it can come in the config directly.
-fn receive_request(sock: &UnixDatagram) -> Option<(SocketAddr, String)> {
-    debug!("Waiting for a request ...");
+// wait for a request to come and return it as a String.
+fn receive_request(sock: &UnixDatagram) -> Option<(SocketAddr, GenId, String)> {
+    debug!("━━━━━━ Waiting for data ━━━━━━");
     let mut rx_buff = vec![0u8; 1024];
-    let mut msg_size_wire = [0u8; 8];
+    let mut buf_64 = [0u8; 8];
     let msg_size: u64;
+    let genid: GenId;
 
-    if let Err(e) = sock.recv_from(msg_size_wire.as_mut()) {
+    /* message length */
+    if let Err(e) = sock.recv_from(buf_64.as_mut()) {
         error!("Error receiving msg size: {e}");
         return None;
     } else {
-        msg_size = u64::from_ne_bytes(msg_size_wire);
-        debug!("Received request size: {} octets", msg_size);
+        msg_size = u64::from_ne_bytes(buf_64);
+        debug!(
+            "Got 8 octets for message size. Value is {} octets",
+            msg_size
+        );
         if msg_size as usize > rx_buff.capacity() {
             rx_buff.resize(msg_size as usize, 0);
         }
     }
-    debug!("Waiting to receive request of {} octets", msg_size);
+
+    /* generation Id */
+    if let Err(e) = sock.recv_from(buf_64.as_mut()) {
+        error!("Error receiving generation id: {e}");
+        return None;
+    } else {
+        genid = i64::from_ne_bytes(buf_64);
+    }
+
+    /* config as a string */
+    debug!("Waiting to receive {} octets", msg_size);
     match sock.recv_from(rx_buff.as_mut_slice()) {
         Ok((rx_len, peer)) => {
+            debug!("Received {} octets", rx_len);
             if let Ok(decoded) = String::from_utf8(rx_buff[0..rx_len].to_vec()) {
-                Some((peer, decoded.to_owned()))
+                Some((peer, genid, decoded.to_owned()))
             } else {
                 error!("Failed to decode config");
                 None
@@ -100,6 +117,12 @@ pub(crate) struct Args {
     sock_path: String,
 
     // optional
+    #[arg(
+        long,
+        value_name = "Loglevel (error, warn, info, debug, trace). Defaults to debug"
+    )]
+    loglevel: Option<String>,
+
     #[arg(long, value_name = "Directory where received configs are stored")]
     outdir: Option<String>,
     #[arg(long, value_name = "Full path to reloader (frr-reload.bin|py)")]
@@ -131,11 +154,19 @@ impl Args {
     pub fn outdir(&self) -> &str {
         self.outdir.as_ref().map_or("/tmp/configs/hedgehog", |v| v)
     }
+    pub fn loglevel(&self) -> Result<Level, ()> {
+        if let Some(loglevel) = &self.loglevel {
+            Level::from_str(loglevel.as_ref()).map_err(|_| ())
+        } else {
+            Ok(Level::DEBUG)
+        }
+    }
 }
 
 fn main() {
     let args = Args::parse();
-    init_logging();
+    let loglevel = args.loglevel().expect("Bad loglevel");
+    init_logging(loglevel);
 
     // open & bind listening socket
     let sock_addr = &args.sock_path;
@@ -150,17 +181,20 @@ fn main() {
     debug!("frr-agent listening at '{sock_addr}' started");
     debug!("frr-agent writes configs at '{}'", &args.outdir());
     debug!("frr-agent reloader is '{}'", &args.reloader());
+    debug!("frr-agent loglevel is '{}'", loglevel);
 
     loop {
         // receive request to apply config. Request is a string with the whole config
-        if let Some((requestor, request_string)) = receive_request(&sock) {
+        if let Some((requestor, genid, request_string)) = receive_request(&sock) {
             let response = if &request_string == "KEEPALIVE" {
                 debug!("Got keepalive request from {requestor:?}");
                 "Ok".to_string()
             } else {
                 debug!("Got config request from {requestor:?}");
+                debug!("Config corresponds to generation {genid}");
                 frr_reload(
                     args.reloader(),
+                    genid,
                     &request_string,
                     args.outdir(),
                     &frr_reload_args,
@@ -223,7 +257,7 @@ exit
             "/usr/local/bin",
         ];
 
-        let result = frr_reload(reloader, &config_string, outdir, &args);
+        let result = frr_reload(reloader, 0, &config_string, outdir, &args);
         println!("result: {result}");
     }
 }

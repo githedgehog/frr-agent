@@ -10,9 +10,12 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use tracing::{debug, error};
-
 use thiserror::Error;
+
+#[allow(unused)]
+use tracing::{debug, error, trace};
+
+use super::GenId;
 
 #[derive(Error, Debug)]
 pub enum FrrErr {
@@ -63,10 +66,10 @@ fn execute(reloader: &str, args: &Vec<&str>, conf_file: &Path) -> Result<(), Frr
     Ok(())
 }
 
-fn write_config_file(config: &str, outdir: &str) -> Result<PathBuf, FrrErr> {
+fn write_config_file(genid: GenId, config: &str, outdir: &str) -> Result<PathBuf, FrrErr> {
     /* file name to write the config into */
     let mut conf_file = PathBuf::from(outdir);
-    conf_file.push("latest");
+    conf_file.push(format!("frr-config-gen-{genid}"));
     conf_file.set_extension("conf");
     create_dir_all(conf_file.parent().unwrap())
         .map_err(|e| FrrErr::COnfigFileWriteFailed(format!("Could not create dir: {e:?}")))?; // fixme unwrap
@@ -91,18 +94,19 @@ fn write_config_file(config: &str, outdir: &str) -> Result<PathBuf, FrrErr> {
     let contents = read_to_string(&conf_file).map_err(|e| {
         FrrErr::COnfigFileWriteFailed(format!("Unable to read written file: {e:?}"))
     })?;
-    debug!("Requested config is:\n{contents}");
+    trace!("Requested config is:\n{contents}");
 
     Ok(conf_file)
 }
 
 fn do_frr_reload(
     reloader: &str,
+    genid: GenId,
     config: &str,
     outdir: &str,
     reload_args: &Vec<&str>,
 ) -> Result<(), FrrErr> {
-    let config_file = write_config_file(config, outdir)?;
+    let config_file = write_config_file(genid, config, outdir)?;
 
     // call frr-reload with --test
     let mut args = vec!["--test"];
@@ -116,8 +120,14 @@ fn do_frr_reload(
     Ok(())
 }
 
-pub fn frr_reload(reloader: &str, config: &str, outdir: &str, reload_args: &Vec<&str>) -> String {
-    match do_frr_reload(reloader, config, outdir, reload_args) {
+pub fn frr_reload(
+    reloader: &str,
+    genid: GenId,
+    config: &str,
+    outdir: &str,
+    reload_args: &Vec<&str>,
+) -> String {
+    match do_frr_reload(reloader, genid, config, outdir, reload_args) {
         Ok(_) => "Ok".to_string(),
         Err(e) => e.to_string(),
     }
