@@ -27,21 +27,22 @@ pub enum FrrErr {
     CmdWaitFailed(String),
     #[error("Reloading error")]
     ReloadErr,
+    #[error("Internal failure: {0}")]
+    Failure(&'static str),
 }
 
 fn execute(reloader: &str, args: &Vec<&str>, conf_file: &Path) -> Result<(), FrrErr> {
+    /* convert config file path back to string */
+    let conf_file = conf_file.to_str().ok_or(FrrErr::Failure("Bad filename"))?;
+
     /* Build command */
     let mut cmd = Command::new(reloader);
     cmd.args(args);
-    cmd.arg(conf_file.to_str().unwrap());
+    cmd.arg(conf_file);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    debug!(
-        "Executing: {reloader} {} {}",
-        args.join(" "),
-        conf_file.display()
-    );
+    debug!("Executing: {reloader} {} {}", args.join(" "), conf_file);
 
     /* execute */
     let output = cmd
@@ -71,8 +72,11 @@ fn write_config_file(genid: GenId, config: &str, outdir: &str) -> Result<PathBuf
     let mut conf_file = PathBuf::from(outdir);
     conf_file.push(format!("frr-config-gen-{genid}"));
     conf_file.set_extension("conf");
-    create_dir_all(conf_file.parent().unwrap())
-        .map_err(|e| FrrErr::COnfigFileWriteFailed(format!("Could not create dir: {e:?}")))?; // fixme unwrap
+
+    if let Some(parent) = conf_file.parent() {
+        create_dir_all(parent)
+            .map_err(|e| FrrErr::COnfigFileWriteFailed(format!("Could not create dir: {e:?}")))?;
+    }
 
     /* create the file */
     let mut file = OpenOptions::new()
@@ -128,7 +132,7 @@ pub fn frr_reload(
     reload_args: &Vec<&str>,
 ) -> String {
     match do_frr_reload(reloader, genid, config, outdir, reload_args) {
-        Ok(_) => "Ok".to_string(),
+        Ok(()) => "Ok".to_string(),
         Err(e) => e.to_string(),
     }
 }
