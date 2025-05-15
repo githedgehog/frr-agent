@@ -69,16 +69,17 @@ fn receive_request(sock: &mut UnixStream) -> Result<(GenId, String), String> {
     let mut genid_buf = [0u8; 8];
 
     sock.read_exact(&mut len_buf)
-        .map_err(|e| format!("Could not receive msg-len: {}", e.to_string()))?;
+        .map_err(|e| format!("Could not receive msg-len: {e}"))?;
     sock.read_exact(&mut genid_buf)
-        .map_err(|e| format!("Could not receive genid: {}", e.to_string()))?;
+        .map_err(|e| format!("Could not receive genid: {e}"))?;
 
-    let msg_size = u64::from_ne_bytes(len_buf) as usize;
+    let msg_size = usize::try_from(u64::from_ne_bytes(len_buf))
+        .map_err(|e| format!("Could not determine message length: {e}"))?;
     let genid = i64::from_ne_bytes(genid_buf);
 
     let mut rx_buff = vec![0u8; msg_size];
     sock.read_exact(&mut rx_buff)
-        .map_err(|e| format!("Could not receive request body: {}", e.to_string()))?;
+        .map_err(|e| format!("Could not receive request body: {e}"))?;
     let request = String::from_utf8(rx_buff[0..msg_size].to_vec())
         .map_err(|e| format!("Could not decode request body: {e:?}"))?;
 
@@ -191,7 +192,11 @@ impl Args {
 
 fn main() {
     let args = Args::parse();
-    let loglevel = args.loglevel().expect("Bad loglevel");
+    let Ok(loglevel) = args.loglevel() else {
+        println!("Bad loglevel");
+        exit(1);
+    };
+
     init_logging(loglevel);
     debug!("Starting FRR-agent...");
 
