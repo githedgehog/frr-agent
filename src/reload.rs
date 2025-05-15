@@ -31,13 +31,25 @@ pub enum FrrErr {
     Failure(&'static str),
 }
 
-fn execute(reloader: &str, args: &Vec<&str>, conf_file: &Path) -> Result<(), FrrErr> {
+fn execute(
+    reloader: &str,
+    reload_args: &Vec<&str>,
+    conf_file: &Path,
+    test: bool,
+) -> Result<(), FrrErr> {
+    let mut args = if test {
+        vec!["--test"]
+    } else {
+        vec!["--reload"]
+    };
+    args.extend_from_slice(reload_args);
+
     /* convert config file path back to string */
     let conf_file = conf_file.to_str().ok_or(FrrErr::Failure("Bad filename"))?;
 
     /* Build command */
     let mut cmd = Command::new(reloader);
-    cmd.args(args);
+    cmd.args(args.clone());
     cmd.arg(conf_file);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -63,7 +75,12 @@ fn execute(reloader: &str, args: &Vec<&str>, conf_file: &Path) -> Result<(), Frr
         error!(">>>> FRR Reload failed! <<<<");
         return Err(FrrErr::ReloadErr);
     }
-    debug!("Successfully reloaded new configuration");
+
+    if test {
+        debug!("Successfully TESTED new configuration");
+    } else {
+        debug!("Successfully APPLIED new configuration");
+    }
     Ok(())
 }
 
@@ -113,14 +130,10 @@ fn do_frr_reload(
     let config_file = write_config_file(genid, config, outdir)?;
 
     // call frr-reload with --test
-    let mut args = vec!["--test"];
-    args.extend_from_slice(reload_args);
-    execute(reloader, &args, &config_file)?;
+    execute(reloader, reload_args, &config_file, true)?;
 
     // call with --reload
-    let mut args = vec!["--reload"];
-    args.extend_from_slice(reload_args);
-    execute(reloader, &args, &config_file)?;
+    execute(reloader, reload_args, &config_file, false)?;
     Ok(())
 }
 
