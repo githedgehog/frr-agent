@@ -3,6 +3,15 @@
 
 // An FRR config reloader daemon
 
+#![deny(
+    unsafe_code,
+    clippy::all,
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
+
 use bytes::BytesMut;
 use clap::Parser;
 use std::fs;

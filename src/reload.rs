@@ -3,6 +3,16 @@
 
 // An FRR config reloader daemon
 
+#![deny(
+    unsafe_code,
+    clippy::all,
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
+
+
 use std::fs::OpenOptions;
 use std::fs::create_dir_all;
 use std::fs::read_to_string;
@@ -13,7 +23,7 @@ use std::process::{Command, Stdio};
 use thiserror::Error;
 
 #[allow(unused)]
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 use super::GenId;
 
@@ -69,17 +79,18 @@ fn execute(
             FrrErr::CmdWaitFailed(format!("{e}"))
         })?;
 
+    debug!("Reload completed (test:{test})");
     if !output.status.success() {
-        debug!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        debug!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         error!(">>>> FRR Reload failed! <<<<");
+        error!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        error!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         return Err(FrrErr::ReloadErr);
     }
 
     if test {
         debug!("Successfully TESTED new configuration");
     } else {
-        debug!("Successfully APPLIED new configuration");
+        info!("Successfully APPLIED new configuration");
     }
     Ok(())
 }
