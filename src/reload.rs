@@ -12,7 +12,6 @@
     clippy::panic
 )]
 
-
 use std::fs::OpenOptions;
 use std::fs::create_dir_all;
 use std::fs::read_to_string;

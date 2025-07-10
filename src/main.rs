@@ -14,6 +14,10 @@
 
 use bytes::BytesMut;
 use clap::Parser;
+
+use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
+use signal_hook::iterator::Signals;
+
 use std::fs;
 use std::io::Read;
 use std::io::Write;
@@ -21,15 +25,15 @@ use std::net::Shutdown;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 
-use std::thread::sleep;
-use std::time::Duration;
-
 use std::path::Path;
 use std::process::exit;
 use std::str;
 use std::str::FromStr;
+use std::thread;
+use std::thread::sleep;
+use std::time::Duration;
 #[allow(unused)]
-use tracing::{Level, debug, error, warn};
+use tracing::{Level, debug, error, info, warn};
 
 use crate::reload::frr_reload;
 
@@ -205,13 +209,33 @@ fn main() {
         println!("Bad loglevel");
         exit(1);
     };
-
     init_logging(loglevel);
+
+    let bind_addr = args.sock_path.clone();
+    if let Ok(mut signals) = Signals::new([SIGINT, SIGQUIT, SIGTERM]) {
+        thread::spawn(move || {
+            if let Some(sig) = signals.forever().next() {
+                match sig {
+                    SIGINT | SIGTERM | SIGQUIT => {
+                        warn!("Terminated (pid {})", std::process::id());
+                        if std::fs::remove_file(bind_addr.clone()).is_ok() {
+                            info!("Removed sock at {bind_addr}");
+                        }
+                        std::process::exit(0);
+                    }
+                    _ => {
+                        warn!("Ignoring signal {sig}");
+                    }
+                }
+            }
+        });
+    }
+
     debug!("Starting FRR-agent...");
 
     /* create unix sock stream listener */
-    let sock_addr = &args.sock_path;
-    let listener = match create_unix_listener(sock_addr) {
+    let bind_addr = &args.sock_path;
+    let listener = match create_unix_listener(bind_addr) {
         Ok(listener) => listener,
         Err(e) => {
             error!("FATAL: Failed to open unix socket: {e:?}. Exiting....");
@@ -222,7 +246,7 @@ fn main() {
     // build args for frr-reload from cmd line as a vector
     let frr_reload_args = build_reload_args(&args);
 
-    debug!("frr-agent listening at '{sock_addr}' started");
+    debug!("frr-agent listening at '{bind_addr}' started");
     debug!("frr-agent writes configs at '{}'", &args.outdir());
     debug!("frr-agent reloader is '{}'", &args.reloader());
     debug!("frr-agent loglevel is '{}'", loglevel);
