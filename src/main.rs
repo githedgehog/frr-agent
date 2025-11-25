@@ -19,8 +19,7 @@ use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook::iterator::Signals;
 
 use std::fs;
-use std::io::Read;
-use std::io::Write;
+use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -51,7 +50,12 @@ fn init_logging(loglevel: Level) {
 
 fn create_unix_listener(bind_addr: &str) -> Result<UnixListener, String> {
     // clean up entry in file system
-    let _ = std::fs::remove_file(bind_addr);
+    debug!("Removing {bind_addr}...");
+    match std::fs::remove_file(bind_addr) {
+        Ok(()) => debug!("Successfully deleted {bind_addr}"),
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound) => debug!("Did not find {bind_addr}"),
+        Err(e) => warn!("Could not remove {bind_addr}: {e}"),
+    }
     let bind_path = Path::new(bind_addr);
 
     // create intermediate directories if needed
@@ -133,7 +137,7 @@ fn build_reload_args(args: &Args) -> Vec<&str> {
 }
 
 // cmd line args the reloader accepts. Fixme: use PathBuf instead of String?
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(name = "FRR reload agent")]
 #[command(version = "1.0")]
 #[command(about = "Daemon to reload FRR configs", long_about = None)]
@@ -217,9 +221,13 @@ fn main() {
             if let Some(sig) = signals.forever().next() {
                 match sig {
                     SIGINT | SIGTERM | SIGQUIT => {
-                        warn!("Terminated (pid {})", std::process::id());
-                        if std::fs::remove_file(bind_addr.clone()).is_ok() {
-                            info!("Removed sock at {bind_addr}");
+                        warn!("Terminated (pid {}) on signal {sig}", std::process::id());
+                        match std::fs::remove_file(bind_addr.clone()) {
+                            Ok(()) => info!("Removed sock at {bind_addr}"),
+                            Err(e) if matches!(e.kind(), ErrorKind::NotFound) => {
+                                debug!("Did not find {bind_addr}");
+                            }
+                            Err(e) => warn!("Could not remove {bind_addr}: {e}"),
                         }
                         std::process::exit(0);
                     }
@@ -283,6 +291,7 @@ fn main() {
                     let _ = stream.shutdown(Shutdown::Both);
                     break; /* move to accept again */
                 }
+                debug!("Successfully sent response");
             }
         }
     }
